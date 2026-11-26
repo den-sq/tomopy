@@ -86,8 +86,8 @@ legendre(int n, const float* coefs, float x)
 }
 
 void
-set_pswf_tables(float C, int nt, float lambda, const float* coefs, int ltbl, int linv,
-                float* wtbl, float* winv)
+set_pswf_tables(float C, int nt, float lambda, const float* coefs, int ltbl, int pdim,
+                int L, float* wtbl, float* winv)
 {
     // Set up lookup tables for convolvent (used in Phase 1 of
     // do_recon()), and for the final correction factor (used in
@@ -95,7 +95,10 @@ set_pswf_tables(float C, int nt, float lambda, const float* coefs, int ltbl, int
 
     int         i;
     float       norm;
-    const float fac   = (float) ltbl / (linv + 0.5);
+    // Match the deapodization to the truncated gridding kernel width L.
+    // Image offsets are measured in units of the FFT half-width.
+    const int   half  = pdim / 2;
+    const float fac   = ltbl * (M_PI * L / (2.0 * C)) / half;
     const float polyz = legendre(nt, coefs, 0.);
 
     wtbl[0] = 1.0;
@@ -110,15 +113,15 @@ set_pswf_tables(float C, int nt, float lambda, const float* coefs, int ltbl, int
     // in the inverse Fourier transform of the convolvent.
     norm = sqrt(M_PI / 2 / C / lambda) / 1.2;
 
-    winv[linv] = norm / wtbl[0];
+    // Cover every FFT pixel, including the negative Nyquist endpoint.
+    // Phase 3 reads index j + pady (or k + padx), whose true offset is
+    // that index minus half. Keep the checkerboard phase at that offset.
     __PRAGMA_IVDEP
-    for(i = 1; i <= linv; i++)
+    for(i = 0; i < pdim; i++)
     {
-        // Minus sign for alternate entries
-        // corrects for "natural" data layout
-        // in array H at end of Phase 1.
-        norm           = -norm;
-        winv[linv + i] = winv[linv - i] = norm / wtbl[(int) roundf(i * fac)];
+        const int   offset = i - half;
+        const float sign   = (abs(offset) & 1) ? -1.0 : 1.0;
+        winv[i] = sign * norm / wtbl[(int) roundf(abs(offset) * fac)];
     }
 }
 
@@ -248,7 +251,7 @@ gridrec(const float* data, int dy, int dt, int dx, const float* center,
     __ASSSUME_64BYTES_ALIGNED(H);
     wtbl = malloc_vector_f(ltbl + 1);
     __ASSSUME_64BYTES_ALIGNED(wtbl);
-    winv = malloc_vector_f(pdim - 1);
+    winv = malloc_vector_f(pdim);
     __ASSSUME_64BYTES_ALIGNED(winv);
     J_z = malloc_vector_f(pdim2 * dt);
     __ASSSUME_64BYTES_ALIGNED(J_z);
@@ -269,7 +272,7 @@ gridrec(const float* data, int dy, int dt, int dx, const float* center,
     __ASSSUME_64BYTES_ALIGNED(cose);
 
     // Set up PSWF lookup tables.
-    set_pswf_tables(C, nt, lambda, coefs, ltbl, M02, wtbl, winv);
+    set_pswf_tables(C, nt, lambda, coefs, ltbl, pdim, L, wtbl, winv);
 
 #ifdef TOMOPY_USE_MKL
     DFTI_DESCRIPTOR_HANDLE reverse_1d;
