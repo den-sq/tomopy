@@ -37,15 +37,24 @@ Features
 Installation
 ============
 
-Have `Conda <http://continuum.io/downloads>`_ installed first,
-then open a terminal or a command prompt window and run:
+This branch provides the ``1.15.3-densq.1`` gridrec fixes as a downloadable
+Linux x86-64 package with CUDA 12.9 support and FFTW. With Conda installed,
+activate your lftomo environment and run:
 
 .. code-block::
 
-  conda install -c conda-forge tomopy
+  CONDA_AGGRESSIVE_UPDATE_PACKAGES='' conda install \
+    --freeze-installed --override-channels \
+    -c https://raw.githubusercontent.com/den-sq/tomopy/1.15.3-densq.1/conda/channel \
+    -c conda-forge \
+    'libtomo=1.15.3=cuda12.9h1234567_densq1_103' \
+    'tomopy=1.15.3=pyhd8ed1ab_2'
 
+Conda downloads the patched native ``libtomo`` from this branch and the
+unchanged Python ``tomopy`` wrapper and dependencies from conda-forge. No local
+compilation is needed. See the `package instructions <conda/README.rst>`_ for
+requirements, the direct download, and the build pin to retain in your environment.
 
-.. warning:: TomoPy will drop support for Python 2 before 1 January 2020. For more information, visit https://python3statement.org/.
 
 Try Now
 =======

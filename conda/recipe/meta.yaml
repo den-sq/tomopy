@@ -1,0 +1,161 @@
+{% set version = "1.15.3" %}
+{% set build = 3 %}
+
+# Set CUDA related variables
+{% if cuda_compiler_version is not defined or cuda_compiler_version == "None" %}
+  {% set use_cuda = "OFF" %}
+  {% set cuda_build_prefix = "" %}
+  {% set cuda_build_post = build %}
+{% else %}
+  {% set use_cuda = "ON" %}
+  {% set cuda_build_prefix = "cuda" + cuda_compiler_version|string %}
+  {% set cuda_build_post = build + 100 %}
+{% endif %}
+
+{% set fft_impl = fft_impl | default('fftw') %}
+{% if fft_impl.startswith("mkl") %}
+  {% set cuda_build_post = cuda_build_post + 10 %}
+{% else %}
+  {% set cuda_build_post = cuda_build_post %}
+{% endif %}
+
+package:
+  name: libtomo
+  version: {{ version }}
+
+source:
+  - url: https://raw.githubusercontent.com/den-sq/tomopy/1.15.3-densq.1/conda/sources/tomopy-cf34df4b4f5206b86368be46cb63b4b62a595e68.tar.gz
+    sha256: e48cd808f3e254f4993e7018bc70a7afb161ebbd58cb73b3a88ba7d58561d643
+    patches:
+      - shared-cuda-npp.patch
+    # There is a special fork for tomopy, so it does not make sense to
+    # dynamically link to PTL from a shared library. This TomoPy fork of PTL
+    # contains platform compatiblity patches for RISC and Apple Silicon which
+    # upstream has not accepted.
+  - url: https://github.com/tomopy/PTL/archive/bbf29702ba1e21eacb54958b2914d871b4139253.tar.gz
+    sha256: dbf0b6c34b399899652f900b4ebe01d71ca1151870913184df7bc5929a24d2c0
+    folder: source/PTL
+
+build:
+  number: {{ build }}
+
+app:
+  own_environment: true
+
+outputs:
+  - name: libtomo
+    script: build-cxx.sh  # [unix]
+    script: bld-cxx.bat  # [win]
+    build:
+      string: {{ cuda_build_prefix }}h{{ PKG_HASH }}_densq1_{{ cuda_build_post }}
+      script_env:
+        - USE_CUDA={{ use_cuda }}
+        - USE_MKL=OFF  # [(fft_impl or "").startswith("fftw")]
+        - USE_MKL=ON   # [(fft_impl or "").startswith("mkl")]
+        - USE_OPENCV=OFF
+      run_exports:
+        - {{ pin_subpackage('libtomo') }}
+        - libtomo =*=cuda*  # [cuda_compiler_version != "None"]
+        - libtomo =*=h*     # [cuda_compiler_version == "None"]
+      track_features:
+        - nocuda_CmNhJ1DLKR  # [cuda_compiler_version == "None"]
+    requirements:
+      build:
+        - {{ compiler('c') }}
+        - {{ stdlib("c") }}
+        - {{ compiler('cxx') }}
+        - {{ compiler('cuda') }}  # [cuda_compiler_version != "None"]
+        - cmake >=3.23
+        - llvm-openmp  # [osx]
+        - libgomp      # [linux]
+        - ninja
+        - pkgconfig  # [(fft_impl or "").startswith("fftw")]
+      host:
+        - libnpp-dev  # [(cuda_compiler_version or "").startswith("12")]
+        - {{ fft_impl }}
+        - mkl-devel  # [(fft_impl or "").startswith("mkl")]
+      run:
+        - __cuda  # [cuda_compiler_version != "None"]
+      run_constrained:
+        - tomopy >1.11.0  # tomopy split into two packages
+    test:
+      commands:
+        - test -f $PREFIX/lib/libtomo-recon$SHLIB_EXT  # [unix]
+        - test -f $PREFIX/include/libtomo/recon.h  # [unix]
+        - test -f $PREFIX/lib/cmake/libtomo/libtomoTargets.cmake  # [unix]
+        - if not exist %LIBRARY_LIB%\\tomo-recon.lib exit 1  # [win]
+        - if not exist %LIBRARY_BIN%\\tomo-recon.dll exit 1  # [win]
+        - if not exist %LIBRARY_INC%\\libtomo\\recon.h exit 1  # [win]
+        - if not exist %LIBRARY_LIB%\\cmake\\libtomo\\libtomoTargets.cmake exit 1  # [win]
+
+  - name: tomopy
+    script: build-python.sh  # [unix]
+    script: bld-python.bat  # [win]
+    build:
+    # Only need to build a noarch package on one platform
+      skip: true  # Use the unchanged conda-forge Python package.
+      noarch: python
+      script_env:
+        - SETUPTOOLS_SCM_PRETEND_VERSION={{ PKG_VERSION }}
+    requirements:
+      host:
+        - pip
+        - python {{ python_min }}
+        - setuptools >=45
+        - setuptools_scm >=6.2
+        - setuptools_scm_git_archive
+      run:
+        - {{ pin_subpackage('libtomo') }}
+        - importlib-metadata
+        - numexpr >=2.0,<3
+        - numpy >=2.0,<3
+        - pywavelets >=1.0,<2
+        - python >={{ python_min }},<4
+        - scikit-image >=0.22,<0.26
+        - scipy >=1.12,<2
+        - tifffile >=2019,<2025.2.18
+      run_constrained:
+        - astra-toolbox >1.8,<3
+    test:
+      requires:
+        - pip
+        - pytest
+        - python {{ python_min }}
+      imports:
+        - tomopy
+        - tomopy.misc
+        - tomopy.prep
+        - tomopy.recon
+        - tomopy.sim
+        - tomopy.util
+      source_files:
+        - test/*
+      commands:
+        - pip check
+        - unset CUDA_VERSION   # [unix]
+        - set "CUDA_VERSION="  # [win]
+        - pytest test -vs
+
+about:
+  home: http://tomopy.readthedocs.io
+  license: BSD-3-Clause AND MIT
+  license_family: BSD
+  license_file:
+    - LICENSE.txt
+    - source/PTL/LICENSE
+  summary: Tomographic reconstruction in Python.
+  description: >
+    TomoPy is an open-source Python package for tomographic data processing and image reconstruction.
+  doc_url: http://tomopy.readthedocs.io
+  dev_url: https://github.com/den-sq/tomopy
+
+extra:
+  recipe-maintainers:
+    - tomopy/admins
+    - dgursoy
+    - decarlof
+    - licode
+    - ravescovi
+    - tacaswell
+    - oleksandr-pavlyk
+    - carterbox
